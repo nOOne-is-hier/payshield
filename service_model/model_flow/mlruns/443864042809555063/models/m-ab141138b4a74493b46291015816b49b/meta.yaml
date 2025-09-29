@@ -1,0 +1,10 @@
+artifact_location: file:///c:/Users/SKAX/Desktop/workspace/2025_MLOPS/service_model/model_flow/mlruns/443864042809555063/models/m-ab141138b4a74493b46291015816b49b/artifacts
+creation_timestamp: 1759109008896
+experiment_id: '443864042809555063'
+last_updated_timestamp: 1759109027797
+model_id: m-ab141138b4a74493b46291015816b49b
+model_type: null
+name: model
+source_run_id: 28e8b84799824f93933323e06b89ac1c
+status: 2
+status_message: null

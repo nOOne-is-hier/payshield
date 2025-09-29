@@ -1,0 +1,28 @@
+artifact_path: file:///c:/Users/SKAX/Desktop/workspace/2025_MLOPS/service_model/model_flow/mlruns/443864042809555063/models/m-ab141138b4a74493b46291015816b49b/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.11.9
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.7.2
+is_signature_from_type_hint: false
+mlflow_version: 3.4.0
+model_id: m-ab141138b4a74493b46291015816b49b
+model_size_bytes: 710793
+model_uuid: m-ab141138b4a74493b46291015816b49b
+prompts: null
+run_id: 28e8b84799824f93933323e06b89ac1c
+signature:
+  inputs: '[{"type": "tensor", "tensor-spec": {"dtype": "float64", "shape": [-1, 10]}}]'
+  outputs: '[{"type": "tensor", "tensor-spec": {"dtype": "float64", "shape": [-1]}}]'
+  params: null
+type_hint_from_example: false
+utc_time_created: '2025-09-29 01:23:29.283945'
