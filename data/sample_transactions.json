@@ -1,0 +1,43 @@
+
+[
+  {
+    "transaction_id": "txn_1001",
+    "user_id": "user_A",
+    "timestamp": "2025-09-29T10:00:00Z",
+    "amount": 150.00,
+    "currency": "USD",
+    "merchant": "OnlineStore.com",
+    "location": "USA",
+    "status": "completed"
+  },
+  {
+    "transaction_id": "txn_1002",
+    "user_id": "user_B",
+    "timestamp": "2025-09-29T10:05:00Z",
+    "amount": 35.50,
+    "currency": "USD",
+    "merchant": "CoffeeShop",
+    "location": "KOR",
+    "status": "completed"
+  },
+  {
+    "transaction_id": "txn_1003",
+    "user_id": "user_A",
+    "timestamp": "2025-09-29T11:20:00Z",
+    "amount": 2500.00,
+    "currency": "KRW",
+    "merchant": "LuxuryGoods",
+    "location": "FRA",
+    "status": "pending"
+  },
+  {
+    "transaction_id": "txn_1004",
+    "user_id": "user_C",
+    "timestamp": "2025-09-29T11:25:00Z",
+    "amount": 5.00,
+    "currency": "EUR",
+    "merchant": "VendingMachine",
+    "location": "DEU",
+    "status": "completed"
+  }
+]
