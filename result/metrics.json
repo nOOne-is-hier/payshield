@@ -16,39 +16,46 @@
     }
   },
   "timing_sec": {
-    "fit": 0.8763554096221924,
-    "predict": 0.13480615615844727
+    "fit": 0.7605533599853516,
+    "predict": 0.04729151725769043
   },
-  "isoforest": {
-    "n_estimators": 100,
-    "contamination": "0.0010540369615627855"
+  "model": {
+    "type": "autoencoder_cosine",
+    "epochs": 40,
+    "batch_size": 16384,
+    "lr": 0.01,
+    "arch": "30-64-128-64-30 (BN+LeakyReLU), L1Loss",
+    "device": "cuda",
+    "scaler": "StandardScaler(train-fit)"
   },
+  "isoforest": null,
   "default_rule": {
-    "acc": 0.9987000210807392,
-    "precision": 0.37037037037037035,
-    "recall": 0.3333333333333333,
-    "f1": 0.3508771929824561,
-    "tn": 28415,
-    "fp": 17,
-    "fn": 20,
-    "tp": 10
+    "acc": 0.9986648865153538,
+    "precision": 0.36666666666666664,
+    "recall": 0.36666666666666664,
+    "f1": 0.36666666666666664,
+    "tn": 28413,
+    "fp": 19,
+    "fn": 19,
+    "tp": 11
   },
   "threshold_suggestions": {
     "bestF1": {
-      "threshold": -0.002181979459371669,
-      "acc": 0.9986297519499684,
-      "precision": 0.3448275862068966,
-      "recall": 0.3333333333333333,
-      "f1": 0.3389830508474576,
-      "tn": 28413,
-      "fp": 19,
-      "fn": 20,
-      "tp": 10
+      "threshold": 0.18451872897148178,
+      "acc": 0.9982081371653433,
+      "precision": 0.3157894736842105,
+      "recall": 0.6,
+      "f1": 0.41379310344827586,
+      "tn": 28393,
+      "fp": 39,
+      "fn": 12,
+      "tp": 18
     }
   },
   "files": {
     "threshold_curve_csv": "./result/threshold_curve.csv",
     "misclassified_default_csv": "./result/misclassified_default.csv",
-    "misclassified_bestF1_csv": "./result/misclassified_bestF1.csv"
+    "misclassified_bestF1_csv": "./result/misclassified_bestF1.csv",
+    "misclassified_recall_at_p90_csv": null
   }
 }
