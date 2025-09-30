@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: be-deploy
+  namespace: skala-practice
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: be }
+  template:
+    metadata:
+      labels: { app: be }
+    spec:
+      containers:
+        - name: be
+          image: amdp-registry.skala-ai.com/skala25a/sk018-be:latest
+          env:
+            - name: UVICORN_WORKERS
+              value: "1"
+          ports:
+            - containerPort: 8000

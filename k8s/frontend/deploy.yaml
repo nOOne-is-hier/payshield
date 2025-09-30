@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fe-deploy
+  namespace: skala-practice
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: fe }
+  template:
+    metadata:
+      labels: { app: fe }
+    spec:
+      containers:
+        - name: fe
+          image: amdp-registry.skala-ai.com/skala25a/sk018-fe:latest
+          ports:
+            - containerPort: 80
