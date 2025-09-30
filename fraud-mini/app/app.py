@@ -424,6 +424,9 @@ class DriftReq(BaseModel):
 @app.post("/feeder/start")
 def feeder_start():
     ok = feeder.start_normal()
+    if ok:
+        print("[FEEDER] start_normal via HTTP")
+        dashboard_summary({"text": "[FEEDER] start_normal via HTTP"})
     return {"ok": ok, **feeder.status()}
 
 
@@ -436,6 +439,9 @@ def feeder_stop():
 @app.post("/feeder/inject_drift")
 def feeder_inject(body: DriftReq):
     ok = feeder.inject_drift(body.seconds)
+    if ok:
+        print(f"[FEEDER] inject_drift {body.seconds}s via HTTP")
+        dashboard_summary({"text": f"[FEEDER] inject_drift {body.seconds}s via HTTP"})
     return {"ok": ok, **feeder.status()}
 
 

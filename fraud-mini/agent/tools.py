@@ -45,7 +45,7 @@ def send_sms(to: str, message: str) -> dict:
 def post_dashboard_summary(text: str, payload: dict = None) -> dict:
     """대시보드 요약 저장. 간단히 로그/파일/별도 API로 밀어넣자."""
     # 필요하면 /dashboard/summary POST 엔드포인트 하나 추가해서 저장하세요.
-    print("[DASHBOARD]", text[:140])
+    print("[DASHBOARD]", text)
     return {"ok": True}
 
 
@@ -63,5 +63,13 @@ def feeder_inject_drift(seconds: float = 30.0) -> dict:
     r = httpx.post(
         f"{BASE_URL}/feeder/inject_drift", json={"seconds": seconds}, timeout=5
     )
+    r.raise_for_status()
+    return r.json()
+
+
+@tool
+def feeder_stop() -> dict:
+    """정상 feeder 루프를 중지합니다."""
+    r = httpx.post(f"{BASE_URL}/feeder/stop", timeout=5)
     r.raise_for_status()
     return r.json()
