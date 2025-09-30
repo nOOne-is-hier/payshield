@@ -1,158 +1,126 @@
 pipeline {
-  agent {
-    kubernetes {
-      // Jenkins Kubernetes Plugin 필요
-      yaml """
-apiVersion: v1
-kind: Pod
-metadata:
-  labels:
-    app: kaniko-ci
-spec:
-  serviceAccountName: default
-  containers:
-  - name: kaniko
-    image: gcr.io/kaniko-project/executor:latest
-    command:
-    - cat
-    tty: true
-    volumeMounts:
-    - name: docker-config
-      mountPath: /kaniko/.docker
-  volumes:
-  - name: docker-config
-    emptyDir: {}
-"""
-    }
+  agent any
+
+  environment {
+    // ====== 사용자 수정 영역 ======
+    GIT_URL                = 'https://github.com/nOOne-is-hier/payshield.git'
+    GIT_BRANCH             = 'main'                         // 필요시 master
+    GIT_ID                 = 'skala-github-id'              // GitHub PAT (username/password or token)
+    REG_URL                = 'amdp-registry.skala-ai.com'   // Harbor 도메인
+    REG_PROJECT            = 'skala25a'                     // Harbor 프로젝트
+    FE_NAME                = 'fe-deploy'                     // 프론트 이미지명
+    BE_NAME                = 'be-deploy'                     // 백엔드 이미지명
+    DOCKER_CRED_ID         = 'skala-image-registry-id'      // Harbor 계정(Username/Password)
+    // ============================
+
+    REG                    = "${REG_URL}/${REG_PROJECT}"
+    FE_IMG                 = "${REG}/${FE_NAME}"
+    BE_IMG                 = "${REG}/${BE_NAME}"
+    SHORT_SHA              = ''
+    DEFAULT_BRANCH         = ''
   }
 
   options {
     disableConcurrentBuilds()
     timestamps()
     ansiColor('xterm')
-    buildDiscarder(logRotator(numToKeepStr: '20'))
-    timeout(time: 30, unit: 'MINUTES')
-  }
-
-  environment {
-    // ====== 환경값: 네 값으로 수정 ======
-    HARBOR_REG = 'amdp-registry.skala-ai.com'     // Harbor 도메인
-    HARBOR_NS  = 'skala25a'                        // Harbor 프로젝트(네임스페이스)
-    FE_IMG     = "${HARBOR_REG}/${HARBOR_NS}/sk018-fe"
-    BE_IMG     = "${HARBOR_REG}/${HARBOR_NS}/sk018-be"
-    // Kaniko 캐시(선택): 없으면 자동 생성됨
-    CACHE_REPO = "${HARBOR_REG}/${HARBOR_NS}/kaniko-cache"
-    // Git 사용자 정보
-    GIT_EMAIL  = 'lasnier@naver.com'
-    GIT_NAME   = 'KEEHOON WON'
-    // ====== 크리덴셜 ID ======
-    HARBOR_DOCKERCFG = 'skala-image-registry-id'     // Secret file (config.json)
-    GIT_TOKEN_ID     = 'skala-github-idtoken'                // String (PAT)
-
-    // 공통
-    SHORT_SHA = ''
   }
 
   stages {
     stage('Checkout') {
       steps {
-        checkout scm
+        git branch: "${GIT_BRANCH}", url: "${GIT_URL}", credentialsId: "${GIT_ID}"
         script {
-          env.SHORT_SHA = sh(script: "git rev-parse --short=12 HEAD", returnStdout: true).trim()
-          echo "SHORT_SHA=${env.SHORT_SHA}"
+          def sha = sh(script: "git rev-parse --short=12 HEAD", returnStdout: true).trim()
+          writeFile file: 'SHORT_SHA', text: sha + "\n"
+          // (옵션) 기본 브랜치: 실패해도 main으로
+          def defBranch = sh(script: "sh -c 'git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | cut -d\\'/' -f2 || echo ${GIT_BRANCH}'", returnStdout: true).trim()
+          writeFile file: 'DEFAULT_BRANCH', text: defBranch + "\n"
+          echo "SHORT_SHA=${sha}, DEFAULT_BRANCH=${defBranch}"
+          sh 'docker version || (echo "[!] docker cli not found" && exit 1)'
         }
       }
     }
 
-    stage('Build & Push Images (Kaniko, parallel)') {
-      parallel {
-        stage('FE') {
-          steps {
-            container('kaniko') {
-              withCredentials([file(credentialsId: "${env.HARBOR_DOCKERCFG}", variable: 'DOCKER_CONFIG_JSON')]) {
-                sh '''
-                  set -eux
-                  # Kaniko docker config 세팅
-                  cp "$DOCKER_CONFIG_JSON" /kaniko/.docker/config.json
-
-                  # 필수 파일 확인
-                  test -f frontend/Dockerfile
-
-                  /kaniko/executor \
-                    --context="${PWD}" \
-                    --dockerfile=frontend/Dockerfile \
-                    --destination="${FE_IMG}:${SHORT_SHA}" \
-                    --destination="${FE_IMG}:latest" \
-                    --cache=true \
-                    --cache-repo="${CACHE_REPO}" \
-                    --use-new-run
-                  echo "${SHORT_SHA}" > fe.sha
-                '''
-              }
-            }
-          }
-        }
-        stage('BE') {
-          steps {
-            container('kaniko') {
-              withCredentials([file(credentialsId: "${env.HARBOR_DOCKERCFG}", variable: 'DOCKER_CONFIG_JSON')]) {
-                sh '''
-                  set -eux
-                  cp "$DOCKER_CONFIG_JSON" /kaniko/.docker/config.json
-                  test -f backend/Dockerfile
-
-                  /kaniko/executor \
-                    --context="${PWD}" \
-                    --dockerfile=backend/Dockerfile \
-                    --destination="${BE_IMG}:${SHORT_SHA}" \
-                    --destination="${BE_IMG}:latest" \
-                    --cache=true \
-                    --cache-repo="${CACHE_REPO}" \
-                    --use-new-run
-                  echo "${SHORT_SHA}" > be.sha
-                '''
-              }
-            }
-          }
+    stage('Docker Login (Harbor)') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: "${DOCKER_CRED_ID}", usernameVariable: 'REG_USER', passwordVariable: 'REG_PASS')]) {
+          sh '''
+            set -eux
+            echo "$REG_PASS" | docker login "${REG_URL}" -u "$REG_USER" --password-stdin
+          '''
         }
       }
     }
 
-    stage('Patch K8s Manifests & Commit') {
+    stage('Build & Push FE') {
+      steps {
+        sh '''
+          set -eux
+          : "${SHORT_SHA:=$(cat SHORT_SHA 2>/dev/null || git rev-parse --short=12 HEAD)}"
+          test -f frontend/Dockerfile
+
+          docker build -t "${FE_IMG}:${SHORT_SHA}" -t "${FE_IMG}:latest" -f frontend/Dockerfile frontend
+          docker push "${FE_IMG}:${SHORT_SHA}"
+          docker push "${FE_IMG}:latest"
+          echo "${SHORT_SHA}" > fe.sha
+        '''
+      }
+    }
+
+    stage('Build & Push BE') {
+      steps {
+        sh '''
+          set -eux
+          : "${SHORT_SHA:=$(cat SHORT_SHA 2>/dev/null || git rev-parse --short=12 HEAD)}"
+          test -f backend/Dockerfile
+
+          docker build -t "${BE_IMG}:${SHORT_SHA}" -t "${BE_IMG}:latest" -f backend/Dockerfile backend
+          docker push "${BE_IMG}:${SHORT_SHA}"
+          docker push "${BE_IMG}:latest"
+          echo "${SHORT_SHA}" > be.sha
+        '''
+      }
+    }
+
+    stage('Patch Manifests (image tag update)') {
       steps {
         sh '''
           set -eux
           FE_SHA=$(cat fe.sha); BE_SHA=$(cat be.sha)
 
-          # 매니페스트 태그 치환
-          # image: <REG>/<NS>/sk018-fe:anything -> image: <REG>/<NS>/sk018-fe:${FE_SHA}
+          # k8s 이미지 태그 치환 (frontend/backend 각각의 deploy.yaml)
           sed -Ei "s#(image:[[:space:]]*${FE_IMG}:).*#\\1${FE_SHA}#g" k8s/frontend/deploy.yaml
           sed -Ei "s#(image:[[:space:]]*${BE_IMG}:).*#\\1${BE_SHA}#g" k8s/backend/deploy.yaml
 
-          echo '--- FE deploy image line ---'
+          echo '--- FE deploy image ---'
           grep -n 'image:' k8s/frontend/deploy.yaml || true
-          echo '--- BE deploy image line ---'
+          echo '--- BE deploy image ---'
           grep -n 'image:' k8s/backend/deploy.yaml || true
+        '''
+      }
+    }
 
+    stage('Git Commit & Push (GitOps)') {
+      steps {
+        sh '''
+          set -eux
           git config --global --add safe.directory '*'
-          git config user.email "${GIT_EMAIL}"
-          git config user.name  "${GIT_NAME}"
+          git config user.name  "skala-gitops"
+          git config user.email "skala@skala-ai.com"
           git add k8s/frontend/deploy.yaml k8s/backend/deploy.yaml || true
-
           if ! git diff --cached --quiet; then
-            git commit -m "ci: deploy images FE=${FE_SHA} BE=${BE_SHA}"
+            git commit -m "ci: update images FE=${SHORT_SHA} BE=${SHORT_SHA}"
           else
-            echo "No manifest changes; skip commit."
+            echo "No manifest changes."
           fi
         '''
-        withCredentials([string(credentialsId: "${env.GIT_TOKEN_ID}", variable: 'GIT_TOKEN')]) {
+        withCredentials([usernamePassword(credentialsId: "${GIT_ID}", usernameVariable: 'GIT_PUSH_USER', passwordVariable: 'GIT_PUSH_PASS')]) {
           sh '''
             set -eux
-            # origin URL에 토큰 삽입
-            REPO_URL=$(git config --get remote.origin.url | sed "s#https://#https://oauth2:${GIT_TOKEN}@#")
-            # 기본 브랜치(main/master) 자동 탐지
-            DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | cut -d'/' -f2 || echo "main")
-            git push "$REPO_URL" HEAD:${DEFAULT_BRANCH}
+            REPO_PATH=$(git config --get remote.origin.url | sed -E 's#^https?://##')
+            git remote set-url origin "https://${GIT_PUSH_USER}:${GIT_PUSH_PASS}@${REPO_PATH}"
+            git push origin "HEAD:${DEFAULT_BRANCH}"
           '''
         }
       }
@@ -160,14 +128,12 @@ spec:
   }
 
   post {
-    success {
-      echo "✅ Build & Push & Patch 성공: ${env.SHORT_SHA}"
-    }
-    failure {
-      echo "❌ 실패. 콘솔 로그 확인 요망."
-    }
+    success { echo "✅ FE/BE push & manifests updated: ${env.SHORT_SHA}" }
+    failure { echo "❌ Pipeline failed. Check logs." }
     always {
-      archiveArtifacts artifacts: '*.sha', onlyIfSuccessful: false
+      script {
+        try { archiveArtifacts artifacts: '*.sha', onlyIfSuccessful: false } catch (e) { echo "skip archive: ${e.class.simpleName}" }
+      }
     }
   }
 }
