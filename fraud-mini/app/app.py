@@ -89,19 +89,47 @@ def predict(body: PredictRequest):
 def metrics(cur_win: int = 300):
     """
     - 최근 cur_win 표본(기본 300)만 사용 (희석 방지)
-    - amount/hour/score 모두 PSI 대상 (drift_monitor가 score 지원한다고 가정)
-    - 레퍼런스 자동 세팅(1회): ref가 없고, 표본 >= MIN_REF, 최근 AR이 매우 낮을 때
-      * 여기서는 '세팅'만 한다. '락'은 별도 API(/drift/reference/lock)에서 수행.
-    - 부수효과 최소화: store.ref_locked는 여기서 건드리지 않는다.
+    - amount / hour / score 모두 PSI 대상 (drift_monitor가 score 지원해야 함)
+    - 레퍼런스 자동 세팅(단 1회): ref가 없고 표본 충분 & 최근 AR 매우 낮을 때
+      * 여기서는 '세팅'만 한다. 잠금은 /drift/reference/lock 에서만 수행.
+    - 부수효과 최소화: 여기서 store.ref_locked는 건드리지 않는다.
     """
-    # ── 기본 지표
-    ar = store.anomaly_rate_recent(600)  # 최근 10분 anomaly rate
-    p95 = store.latency_p95()  # latency p95
+    # ── 0) 기본 지표
+    ar = store.anomaly_rate_recent(600)  # 최근 10분 이상치율
+    p95 = store.latency_p95()  # P95 latency
     model_ver = model_svc.version
+    thr = float(store.threshold)
 
-    # ── 최근 표본 추출
+    # ── 1) 최근 표본 슬라이스
     win = max(50, int(cur_win))  # 최소 50 보장
     recent = list(store.pred_feed)[-win:]
+    # 표본이 너무 적으면 바로 리턴 (참조 세팅/드리프트 계산 불필요)
+    if len(recent) == 0:
+        resp = {
+            "anomaly_rate": ar,
+            "latency_p95_ms": p95,
+            "model_version": model_ver,
+            "threshold": thr,
+            "window_size": 0,
+            "ref_set_at": (
+                int(store.ref_set_at) if getattr(store, "ref_set_at", 0) else 0
+            ),
+            "drift": [],
+            "score_stats": {
+                "p90": 0.0,
+                "p95": 0.0,
+                "mean": 0.0,
+                "near_rate": 0.0,
+                "tail_rate": 0.0,
+                "delta_p95": 0.0,
+                "delta_near": 0.0,
+                "delta_tail": 0.0,
+            },
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        store.metrics_cache = resp
+        return resp
+
     amounts = [float(x.get("amount") or 0.0) for x in recent]
 
     # HH 파싱
@@ -115,9 +143,8 @@ def metrics(cur_win: int = 300):
                 pass
 
     scores = [float(x.get("score") or 0.0) for x in recent]
-    thr = float(store.threshold)
 
-    # ── score 요약(LLM/룰 판단용)
+    # ── 2) 점수 요약(LLM/룰 판단용) ─ 분위/근처/꼬리
     def _q(arr, q):
         if not arr:
             return 0.0
@@ -136,47 +163,57 @@ def metrics(cur_win: int = 300):
     )
     rate_tail = float(np.mean([s >= 0.90 for s in scores])) if scores else 0.0
 
-    # ── 레퍼런스 자동 세팅(단 한 번)
-    MIN_REF = 300
-    AR_REF_MAX = 0.002
-    if drift_monitor.ref_amount is None and len(amounts) >= MIN_REF and ar < AR_REF_MAX:
-        # score 분포 요약도 함께 저장(델타 계산용)
-        store.ref_stats = {
-            "p95": score_p95,
-            "near": rate_near,
-            "tail": rate_tail,
-        }
+    # ── 3) 레퍼런스 자동 세팅(1회) — 부수효과 최소화
+    MIN_REF = max(150, min(300, win))  # 창 크기에 맞춰 유연하게(150~300)
+    AR_REF_MAX = 0.002  # 0.2% 미만이면 정상 구간으로 간주
+    if (
+        getattr(drift_monitor, "ref_amount", None) is None
+        and len(amounts) >= MIN_REF
+        and ar < AR_REF_MAX
+    ):
+        # score 분포 요약 델타 계산용 저장(없으면 생성)
+        if not hasattr(store, "ref_stats") or store.ref_stats is None:
+            store.ref_stats = {}
+        store.ref_stats.update(
+            {
+                "p95": score_p95,
+                "near": rate_near,
+                "tail": rate_tail,
+            }
+        )
+        # amount / hour / score 참조 세팅
+        # (drift_monitor가 set_reference(amounts, hours, scores) 시그니처를 지원해야 함)
         drift_monitor.set_reference(amounts, hours, scores)
         store.ref_set_at = time.time()
 
-    # ── 델타 계산(레퍼런스가 있을 때만)
+    # ── 4) 델타 계산(레퍼런스가 있을 때만)
+    ref_stats = getattr(store, "ref_stats", None)
     delta_p95 = (
-        (score_p95 - store.ref_stats["p95"])
-        if getattr(store, "ref_stats", None)
-        else 0.0
+        float(score_p95 - ref_stats["p95"]) if ref_stats and "p95" in ref_stats else 0.0
     )
     delta_near = (
-        (rate_near - store.ref_stats["near"])
-        if getattr(store, "ref_stats", None)
+        float(rate_near - ref_stats["near"])
+        if ref_stats and "near" in ref_stats
         else 0.0
     )
     delta_tail = (
-        (rate_tail - store.ref_stats["tail"])
-        if getattr(store, "ref_stats", None)
+        float(rate_tail - ref_stats["tail"])
+        if ref_stats and "tail" in ref_stats
         else 0.0
     )
 
-    # ── 드리프트 계산 (amount/hour/score)
+    # ── 5) 드리프트 계산 (amount / hour / score)
+    # (drift_monitor.compute(amounts, hours, scores) 시그니처 가정)
     drift = drift_monitor.compute(amounts, hours, scores)
 
-    # ── 캐시 & 반환
-    store.metrics_cache = {
+    # ── 6) 캐시 & 반환
+    resp = {
         "anomaly_rate": ar,
         "latency_p95_ms": p95,
         "model_version": model_ver,
         "threshold": thr,
         "window_size": len(recent),
-        "ref_set_at": int(store.ref_set_at) if store.ref_set_at else 0,
+        "ref_set_at": int(store.ref_set_at) if getattr(store, "ref_set_at", 0) else 0,
         "drift": drift,
         "score_stats": {
             "p90": round(score_p90, 4),
@@ -190,7 +227,8 @@ def metrics(cur_win: int = 300):
         },
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
-    return store.metrics_cache
+    store.metrics_cache = resp
+    return resp
 
 
 @app.post("/drift/reference/reset")
@@ -275,6 +313,7 @@ _guard = {
     "retrain_at": 0.0,
     "threshold": 0.70,
     "sms_to": "+82-10-0000-0000",
+    "hi_count": 0,  # ★ 추가
 }
 
 

@@ -284,3 +284,69 @@ with open("./result/metrics.json", "w", encoding="utf-8") as f:
 print("\n[SAVE] 핵심 지표 → ./result/metrics.json")
 print("[SAVE] 오탐/누락 목록 → ./result/misclassified_*.csv")
 print("[DONE] Cosine-AE 파이프라인 완료.")
+
+# ========================
+# 7) 모델 아티팩트 내보내기
+# ========================
+import joblib, datetime, os, json, torch
+
+export_dir = os.getenv("EXPORT_DIR", "models/v1.0")
+os.makedirs(export_dir, exist_ok=True)
+
+# 7-1) StandardScaler 저장
+joblib.dump(scaler, os.path.join(export_dir, "scaler.pkl"))
+
+# 7-2) AE 가중치 저장 (state_dict)
+torch.save(model.state_dict(), os.path.join(export_dir, "ae_state.pt"))
+
+# 7-3) model_card.json 저장 (버전/권고 threshold/지표 요약)
+trained_at = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+# 운영 임계값 권고 선택 로직
+thr_default_suggest = float(thr_default)
+thr_bestF1_suggest = float(
+    suggestions.get("bestF1", {}).get("threshold", thr_default_suggest)
+)
+thr_recall_p90_suggest = suggestions.get("recall@p90", {}).get("threshold")
+if thr_recall_p90_suggest is not None:
+    thr_recall_p90_suggest = float(thr_recall_p90_suggest)
+
+model_card = {
+    "version": os.getenv("MODEL_VERSION", "v1.0.0"),
+    "trained_at": trained_at,
+    "data": {
+        "train_rows": int(X_train.shape[0]),
+        "val_rows": int(X_val.shape[0]),
+        "val_anomaly_rate": float(y_val_true.mean()),
+    },
+    "model": summary["model"],  # 네가 위에서 만든 summary의 model 블록 그대로 활용
+    "metrics_offline": {
+        "default_rule": summary["default_rule"],
+        "bestF1": suggestions.get("bestF1"),
+        "recall@p90": suggestions.get("recall@p90"),
+    },
+    "threshold_suggestions": {
+        "default_rule": thr_default_suggest,
+        "bestF1": thr_bestF1_suggest,
+        "recall@p90": thr_recall_p90_suggest,
+    },
+    "files": {"threshold_curve_csv": summary["files"]["threshold_curve_csv"]},
+}
+with open(os.path.join(export_dir, "model_card.json"), "w", encoding="utf-8") as f:
+    json.dump(model_card, f, ensure_ascii=False, indent=2)
+
+# 7-4) signature.json (서빙 I/O 스키마)
+signature = {
+    "inputs": {
+        "dtype": "float32",
+        "shape": ["N", 30],
+        "columns": [f"V{i}" for i in range(1, 31)],
+    },
+    "outputs": {"anomaly_score": "float32", "cosine_sim": "float32"},
+    "score_logic": "anomaly_score = 1 - cosine(X, AE(X))",
+}
+with open(os.path.join(export_dir, "signature.json"), "w", encoding="utf-8") as f:
+    json.dump(signature, f, ensure_ascii=False, indent=2)
+
+print(f"\n[EXPORT] Artifacts saved to: {export_dir}")
+print("[EXPORT] scaler.pkl, ae_state.pt, model_card.json, signature.json")
