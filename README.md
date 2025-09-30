@@ -6,14 +6,49 @@
 로컬 코드 수정 → 컨테이너 내부에서 즉시 반영되도록 **volume mount**를 사용합니다.
 
 ### 1. Docker 컨테이너 실행
-```bash
-docker run --rm -it --gpus all \
-  -v "$(pwd):/workspace" \
-  -w /workspace \
-  pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime bash
-```
+
+터미널 환경(OS)에 맞는 명령어를 복사하여 실행합니다.
+
+#### 1-1. NVIDIA GPU 환경 (권장)
+
+* **Linux / macOS (bash/zsh 터미널)**
+    ```bash
+    docker run --rm -it --gpus all \
+      -v "$(pwd):/workspace" \
+      -w /workspace \
+      pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime bash
+    ```
+
+* **Windows (VS Code 등 PowerShell 터미널)**
+    ```bash
+    docker run --rm -it --gpus all \
+      -v "${PWD}:/workspace" \
+      -w /workspace \
+      pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime bash
+    ```
+
+#### 1-2. CPU 전용 환경
+
+NVIDIA GPU가 없거나, GPU 설정이 어려운 경우 `--gpus all` 옵션을 제외하고 실행합니다. (PyTorch가 CPU 모드로 동작합니다.)
+
+* **Linux / macOS (bash/zsh 터미널)**
+    ```bash
+    docker run --rm -it \
+      -v "$(pwd):/workspace" \
+      -w /workspace \
+      pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime bash
+    ```
+
+* **Windows (VS Code 등 PowerShell 터미널)**
+    ```bash
+    docker run --rm -it \
+      -v "${PWD}:/workspace" \
+      -w /workspace \
+      pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime bash
+    ```
 
 * `-v "$(pwd):/workspace"` : 현재 로컬 프로젝트 경로를 컨테이너의 `/workspace`로 마운트
+    * (Windows PowerShell에서는 `"${PWD}"` 사용)
 * `-w /workspace` : 컨테이너 실행 시 작업 디렉토리 지정
 
 ---
