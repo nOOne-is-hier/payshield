@@ -1,0 +1,61 @@
+{
+  "data": {
+    "train_shape": [
+      110842,
+      30
+    ],
+    "val_shape": [
+      28462,
+      30
+    ],
+    "val_anomaly_count": 30,
+    "val_anomaly_rate": 0.0010540369615627855,
+    "paths": {
+      "train": "./uploaded_files/train.csv",
+      "val": "./uploaded_files/val.csv"
+    }
+  },
+  "timing_sec": {
+    "fit": 0.7278182506561279,
+    "predict": 0.03733086585998535
+  },
+  "model": {
+    "type": "autoencoder_cosine",
+    "epochs": 40,
+    "batch_size": 16384,
+    "lr": 0.01,
+    "arch": "30-64-128-64-30 (BN+LeakyReLU), L1Loss",
+    "device": "cuda",
+    "scaler": "StandardScaler(train-fit)"
+  },
+  "isoforest": null,
+  "default_rule": {
+    "acc": 0.9996486543461457,
+    "precision": 0.8333333333333334,
+    "recall": 0.8333333333333334,
+    "f1": 0.8333333333333334,
+    "tn": 28427,
+    "fp": 5,
+    "fn": 5,
+    "tp": 25
+  },
+  "threshold_suggestions": {
+    "bestF1": {
+      "threshold": 0.2822656031252001,
+      "acc": 0.9996135197807603,
+      "precision": 0.8275862068965517,
+      "recall": 0.8,
+      "f1": 0.8135593220338984,
+      "tn": 28427,
+      "fp": 5,
+      "fn": 6,
+      "tp": 24
+    }
+  },
+  "files": {
+    "threshold_curve_csv": "./result/threshold_curve.csv",
+    "misclassified_default_csv": "./result/misclassified_default.csv",
+    "misclassified_bestF1_csv": "./result/misclassified_bestF1.csv",
+    "misclassified_recall_at_p90_csv": null
+  }
+}
