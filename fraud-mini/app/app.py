@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Body
+from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -12,7 +13,7 @@ from .streamer import scenario
 
 # app/app.py  (당신의 FastAPI 생성 코드 있는 파일)
 from contextlib import asynccontextmanager
-import asyncio
+import asyncio, json
 from app.feeder import feeder
 from app.aiops_agent import agent_worker
 
@@ -448,3 +449,26 @@ def feeder_inject(body: DriftReq):
 @app.get("/feeder/status")
 def feeder_status():
     return feeder.status()
+
+
+@app.get("/dashboard/stream")
+async def dashboard_stream(request: Request):
+    async def eventgen():
+        last_ts = 0.0
+        while True:
+            if await request.is_disconnected():
+                break
+            if dashboard_feed:
+                item = dashboard_feed[-1]
+                ts = float(item.get("ts", 0))
+                if ts > last_ts:
+                    last_ts = ts
+                    body = json.dumps(item, ensure_ascii=False)
+                    yield f"data: {body}\n\n"
+                else:
+                    yield "event: ping\ndata: {}\n\n"
+            else:
+                yield "event: ping\ndata: {}\n\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(eventgen(), media_type="text/event-stream")

@@ -43,10 +43,20 @@ def send_sms(to: str, message: str) -> dict:
 
 @tool
 def post_dashboard_summary(text: str, payload: dict = None) -> dict:
-    """대시보드 요약 저장. 간단히 로그/파일/별도 API로 밀어넣자."""
-    # 필요하면 /dashboard/summary POST 엔드포인트 하나 추가해서 저장하세요.
-    print("[DASHBOARD]", text)
-    return {"ok": True}
+    """대시보드 요약을 FastAPI로 전송해서 피드에 적재합니다."""
+    try:
+        r = httpx.post(
+            f"{BASE_URL}/dashboard/summary",
+            json={"text": text, "payload": payload or {}},
+            timeout=5,
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        # 최소한 콘솔에도 남겨 두기
+        print("[DASHBOARD-LOCAL]", text)
+        print("[DASHBOARD-ERR]", repr(e))
+        return {"ok": False, "error": str(e)}
 
 
 @tool
