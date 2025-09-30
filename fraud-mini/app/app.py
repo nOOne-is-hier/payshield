@@ -8,10 +8,32 @@ import numpy as np
 from app.store import store
 from app.model_loader import model_svc
 from app.drift import drift_monitor
-from app.agent_rules import agent_decide
 from .streamer import scenario
 
-app = FastAPI(title="Fraud Mini AIOps", version="0.1")
+# app/app.py  (당신의 FastAPI 생성 코드 있는 파일)
+from contextlib import asynccontextmanager
+import asyncio
+from app.feeder import feeder
+from app.aiops_agent import agent_worker
+
+stop_event: asyncio.Event | None = None
+worker_task: asyncio.Task | None = None
+
+
+@asynccontextmanager
+async def lifespan(app):
+    # 1) 정상 피더 기동(참조 세팅을 위해 초반 몇 분 유용)
+    feeder.start_normal()
+    # 2) 에이전트 워커(10s)
+    stop_event = asyncio.Event()
+    worker_task = asyncio.create_task(agent_worker(10, stop_event, initial_delay=2.0))
+    yield
+    stop_event.set()
+    await worker_task
+    feeder.stop_normal()
+
+
+app = FastAPI(title="Fraud Mini AIOps", version="0.1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -325,25 +347,28 @@ def drift_reset():
     return {"ok": True}
 
 
+from app.aiops_agent import tick
+
+
 @app.post("/agent/run")
 def agent_run():
-    m = metrics()  # 최신 메트릭 계산
-    recent = alerts(20)["items"]
-    _guard["threshold"] = store.threshold
-    decision = agent_decide(m, recent, _guard)
-    # 액션 실행
-    for act in decision["actions"]:
-        if act["type"] == "THRESHOLD":
-            store.threshold = act["value"]
-            store.threshold_last_changed = time.time()
-            _guard["thr_changed_at"] = store.threshold_last_changed
-        elif act["type"] == "SMS":
-            print("[SMS]", act.get("to"), act.get("message", "")[:120])
-        elif act["type"] == "RETRAIN":
-            # 초간단 동기 재학습 자리: 이번 스코프에선 생략/프린트
-            _guard["retrain_at"] = time.time()
-            print("[RETRAIN] (demo) retrain triggered")
-    return {"summary": decision["summary"], "actions": decision["actions"]}
+    state = tick()
+    if isinstance(state, dict):
+        summary = state.get("summary")
+        actions = state.get("actions", [])
+        metrics = state.get("metrics", {})
+    else:
+        summary = state.summary
+        actions = state.actions
+        metrics = state.metrics or {}
+
+    return {
+        "summary": summary,
+        "actions": actions,
+        "window_size": metrics.get("window_size", 0),
+        "threshold": metrics.get("threshold"),
+        "score_stats": metrics.get("score_stats", {}),
+    }
 
 
 class ScenarioBody(BaseModel):
@@ -369,3 +394,51 @@ def scenario_status():
         "threshold": store.threshold,
         "active_version": model_svc.version,
     }
+
+
+dashboard_feed = []
+
+
+@app.post("/dashboard/summary")
+def dashboard_summary(body: Dict[str, Any]):
+    item = {"ts": time.time(), **body}
+    dashboard_feed.append(item)
+    if len(dashboard_feed) > 200:
+        del dashboard_feed[:-200]
+    return {"ok": True}
+
+
+@app.get("/dashboard/summary")
+def dashboard_summary_get(limit: int = 50):
+    return {"items": list(reversed(dashboard_feed[-limit:]))}
+
+
+# app/app.py (당신의 FastAPI 생성 파일에 이어서)
+from app.feeder import feeder
+
+
+class DriftReq(BaseModel):
+    seconds: float = 30.0
+
+
+@app.post("/feeder/start")
+def feeder_start():
+    ok = feeder.start_normal()
+    return {"ok": ok, **feeder.status()}
+
+
+@app.post("/feeder/stop")
+def feeder_stop():
+    ok = feeder.stop_normal()
+    return {"ok": ok, **feeder.status()}
+
+
+@app.post("/feeder/inject_drift")
+def feeder_inject(body: DriftReq):
+    ok = feeder.inject_drift(body.seconds)
+    return {"ok": ok, **feeder.status()}
+
+
+@app.get("/feeder/status")
+def feeder_status():
+    return feeder.status()
