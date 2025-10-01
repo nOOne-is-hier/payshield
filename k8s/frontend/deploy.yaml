@@ -13,6 +13,6 @@ spec:
     spec:
       containers:
         - name: fe
-          image: amdp-registry.skala-ai.com/skala25a/fe-deploy:aabe409e89bb
+          image: amdp-registry.skala-ai.com/skala25a/fe-deploy:d2aa97f129bc
           ports:
             - containerPort: 80
