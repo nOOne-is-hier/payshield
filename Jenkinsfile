@@ -98,8 +98,8 @@ pipeline {
           FE_SHA=$(cat fe.sha); BE_SHA=$(cat be.sha)
 
           # k8s 이미지 태그 치환 (frontend/backend 각각의 deploy.yaml)
-          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\1${FE_IMG}:${FE_SHA}#g" k8s/frontend/deploy.yaml
-          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\1${BE_IMG}:${BE_SHA}#g" k8s/backend/deploy.yaml
+          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${FE_IMG}:${FE_SHA}#g" k8s/frontend/deploy.yaml
+          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${BE_IMG}:${BE_SHA}#g" k8s/backend/deploy.yaml
 
           echo '--- FE deploy image ---'
           grep -n 'image:' k8s/frontend/deploy.yaml || true
@@ -145,8 +145,8 @@ pipeline {
             echo "BE_IMG=${BE_IMG}, BE_SHA=${BE_SHA}"
 
             # 이름이 무엇이든 'image:' 라인 전체를 덮어씀 (generic)
-            sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\1${FE_IMG}:${FE_SHA}#g" k8s/frontend/deploy.yaml
-            sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\1${BE_IMG}:${BE_SHA}#g" k8s/backend/deploy.yaml
+            sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${FE_IMG}:${FE_SHA}#g" k8s/frontend/deploy.yaml
+            sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${BE_IMG}:${BE_SHA}#g" k8s/backend/deploy.yaml
 
             echo '--- after patch (gitops) ---'
             grep -n 'image:' k8s/frontend/deploy.yaml || true
