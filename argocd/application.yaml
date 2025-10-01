@@ -4,17 +4,17 @@ metadata:
   name: sk018-vue-fastapi
   namespace: skala-argocd
 spec:
-  project: default
+  project: skala
   destination:
-    server: https://kubernetes.default.svc
-    namespace: sk018
+    server: https://96BD83E8CE5CE0396D006BC5CEB350B0.gr7.ap-northeast-2.eks.amazonaws.com
+    namespace: skala-practice
   source:
     repoURL: https://github.com/nOOne-is-hier/payshield.git
-    targetRevision: main
+    targetRevision: gitops
     path: k8s
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=false
+      - PrunePropagationPolicy=background
