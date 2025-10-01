@@ -98,8 +98,8 @@ pipeline {
           FE_SHA=$(cat fe.sha); BE_SHA=$(cat be.sha)
 
           # k8s 이미지 태그 치환 (frontend/backend 각각의 deploy.yaml)
-          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${FE_IMG}:${FE_SHA}#g" k8s/frontend/deploy.yaml
-          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${BE_IMG}:${BE_SHA}#g" k8s/backend/deploy.yaml
+          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\1${FE_IMG}:${FE_SHA}#g" k8s/frontend/deploy.yaml
+          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\1${BE_IMG}:${BE_SHA}#g" k8s/backend/deploy.yaml
 
           echo '--- FE deploy image ---'
           grep -n 'image:' k8s/frontend/deploy.yaml || true
@@ -109,59 +109,62 @@ pipeline {
       }
     }
 
-    // deployment yaml의 Git 커밋/푸시
-    stage('Git Commit & Push (gitops)') {
-      steps {
-        script {
-          def gitRepoPath = env.GIT_URL.replaceFirst(/^https?:\\/\\//, '')
-          echo "gitRepoPath: ${gitRepoPath}"
-        }
+      // deployment yaml의 Git 커밋/푸시
+      stage('Git Commit & Push (gitops)') {
+        steps {
+          script {
+            env.GIT_REPO_PATH = env.GIT_URL.replaceFirst(/^https?:\/\//, '')
+            echo "gitRepoPath: ${env.GIT_REPO_PATH}"
+          }
 
-        sh '''
-          set -eux
-          git config --global --add safe.directory '*'
-          git config --global user.name "skala-gitops"
-          git config --global user.email "skala@skala-ai.com"
+          sh '''
+            set -eux
+            git config --global --add safe.directory '*'
+            git config --global user.name "skala-gitops"
+            git config --global user.email "skala@skala-ai.com"
 
-          git fetch origin || true
+            git fetch origin || true
 
-          # 작업 내용 보존 → gitops 브랜치로 이동 후 재패치(안전)
-          git stash push -u -m "pre-gitops-patch" || true
+            # gitops 브랜치 체크아웃
+            if git show-ref --verify --quiet refs/heads/gitops; then
+              git checkout -f gitops
+            elif git show-ref --verify --quiet refs/remotes/origin/gitops; then
+              git checkout -B gitops origin/gitops
+            else
+              git checkout -B gitops origin/main || git checkout -B gitops main
+            fi
 
-          if git show-ref --verify --quiet refs/heads/gitops; then
-            git checkout -f gitops
-          elif git show-ref --verify --quiet refs/remotes/origin/gitops; then
-            git checkout -B gitops origin/gitops
-          else
-            # 기본 브랜치에서 새로 생성
-            git checkout -B gitops origin/main || git checkout -B gitops main
-          fi
+            # (선택) namespace 삭제 반영
+            [ -f k8s/namespace.yaml ] && git rm k8s/namespace.yaml || true
 
-          # 스태시 복원 (충돌 없을 경우 자동 적용)
-          git stash pop || true
+            # FE/BE 해시 로드
+            FE_SHA=$(cat fe.sha)
+            BE_SHA=$(cat be.sha)
 
-          # 안전하게 한 번 더 치환(브랜치 전환 동안 변경 유실 방지)
-          FE_SHA=$(cat fe.sha); BE_SHA=$(cat be.sha)
-          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${FE_IMG}:${FE_SHA}#g" k8s/frontend/deploy.yaml
-          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${BE_IMG}:${BE_SHA}#g" k8s/backend/deploy.yaml
+            echo "FE_IMG=${FE_IMG}, FE_SHA=${FE_SHA}"
+            echo "BE_IMG=${BE_IMG}, BE_SHA=${BE_SHA}"
 
-          echo '--- after patch (gitops) ---'
-          grep -n 'image:' k8s/frontend/deploy.yaml || true
-          grep -n 'image:' k8s/backend/deploy.yaml || true
+            # 이름이 무엇이든 'image:' 라인 전체를 덮어씀 (generic)
+            sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\1${FE_IMG}:${FE_SHA}#g" k8s/frontend/deploy.yaml
+            sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\1${BE_IMG}:${BE_SHA}#g" k8s/backend/deploy.yaml
 
-          git add k8s/frontend/deploy.yaml k8s/backend/deploy.yaml || true
-          git status
-        '''
+            echo '--- after patch (gitops) ---'
+            grep -n 'image:' k8s/frontend/deploy.yaml || true
+            grep -n 'image:' k8s/backend/deploy.yaml || true
 
-        withCredentials([
-          usernamePassword(
+            # 충돌 마커가 있으면 실패(깨진 YAML 방지)
+            ! grep -R --line-number -E '^(<{7}|={7}|>{7})' k8s || { echo "Conflict markers found"; git --no-pager grep -nE '^(<{7}|={7}|>{7})' k8s; exit 2; }
+
+            # 삭제/수정 모두 스테이징
+            git add -A k8s
+            git status
+          '''
+
+          withCredentials([usernamePassword(
             credentialsId: "${env.GIT_ID}",
             usernameVariable: 'GIT_PUSH_USER',
             passwordVariable: 'GIT_PUSH_PASSWORD'
-          )
-        ]) {
-          script {
-            env.GIT_REPO_PATH = env.GIT_URL.replaceFirst(/^https?:\\/\\//, '')
+          )]) {
             sh '''
               set -eux
               if ! git diff --cached --quiet; then
@@ -178,7 +181,7 @@ pipeline {
         }
       }
     }
-  }
+  
 
   post {
     success {
