@@ -4,7 +4,7 @@ from typing import Optional
 
 
 class Feeder:
-    def __init__(self, base_url="http://127.0.0.1:8000"):
+    def __init__(self, base_url="http://127.0.0.1:8000/api"):
         self.base_url = base_url
         self._normal_thread: Optional[threading.Thread] = None
         self._drift_thread: Optional[threading.Thread] = None

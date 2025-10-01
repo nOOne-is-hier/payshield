@@ -59,7 +59,7 @@ streamer = Streamer()
 
 # ====== 시나리오 런너 ======
 class ScenarioRunner:
-    def __init__(self, base_url="http://127.0.0.1:8000"):
+    def __init__(self, base_url="http://127.0.0.1:8000/api"):
         self.thread: Optional[threading.Thread] = None
         self.running = False
         self.base_url = base_url

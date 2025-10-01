@@ -2,7 +2,7 @@
 from langchain_core.tools import tool
 import httpx, os, time
 
-BASE_URL = os.getenv("AIOPS_BASE_URL", "http://127.0.0.1:8000")
+BASE_URL = os.getenv("AIOPS_BASE_URL", "http://127.0.0.1:8000/api")
 
 
 @tool
