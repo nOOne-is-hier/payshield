@@ -12,4 +12,4 @@ stringData:
   url: https://github.com/nOOne-is-hier/payshield.git
   username: nOOne-is-hier
   project: skala
-  password:
+  password:${PAT}
