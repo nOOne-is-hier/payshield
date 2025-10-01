@@ -3,12 +3,15 @@ kind: Ingress
 metadata:
   name: sk018
   namespace: skala-practice
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
 spec:
   rules:
     - host: sk018.dev.example.com
       http:
         paths:
-          - path: /api
+          - path: /api(/|$)(.*)
             pathType: Prefix
             backend:
               service:

@@ -23,6 +23,9 @@ DEMO = os.getenv("AIOPS_DEMO", "1") == "1"
 AIOPS_DEMO = os.getenv("AIOPS_DEMO", "0") == "1"  # 데모에서만 드리프트 주입 허용
 _FEEDER_STARTED = False  # 프로세스 내 1회 보장
 _LAST_DRIFT_AT = 0.0
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+assert OPENAI_API_KEY, "OPENAI_API_KEY missing"
+
 
 # (NEW) OpenAI LLM - 요약 강화용
 # 환경변수 OPENAI_API_KEY 필요

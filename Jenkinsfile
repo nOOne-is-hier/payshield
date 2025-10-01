@@ -28,6 +28,23 @@ pipeline {
 
   stages {
 
+    stage('Inject OPENAI Secret') {
+      steps {
+        withCredentials([string(credentialsId: 'openai-api-key-id', variable: 'OPENAI_API_KEY')]) {
+          sh '''
+            set -eu
+            # 로그 마스킹 강화: -x 끄기
+            set +x
+            kubectl -n skala-practice create secret generic openai \
+              --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY}" \
+              --dry-run=client -o yaml | kubectl apply -f -
+            # 다시 -x 켜도 됨
+            set -x
+          '''
+        }
+      }
+    }
+
     stage('Checkout') {
       steps {
         git branch: "${GIT_BRANCH}", url: "${GIT_URL}", credentialsId: "${GIT_ID}"
