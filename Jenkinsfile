@@ -95,16 +95,16 @@ pipeline {
       steps {
         sh '''
           set -eux
-          FE_SHA=$(cat fe.sha); BE_SHA=$(cat be.sha)
+          # sha 파일이 "FE_SHA=xxxx" 같은 형식이어도 안전하게 헥사만 추출
+          FE_SHA=$(tr -cd '[:xdigit:]' < fe.sha)
+          BE_SHA=$(tr -cd '[:xdigit:]' < be.sha)
 
-          # k8s 이미지 태그 치환 (frontend/backend 각각의 deploy.yaml)
-          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${FE_IMG}:${FE_SHA}#g" k8s/frontend/deploy.yaml
-          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${BE_IMG}:${BE_SHA}#g" k8s/backend/deploy.yaml
+          # image: <REG>/<NAME>:<oldtag> 의 "태그"만 새 해시로 교체 (레지스트리/이름은 그대로 유지)
+          sed -Ei "s#(image:[[:space:]]*${REG}/${FE_NAME})[^[:space:]]+#\\1:${FE_SHA}#" k8s/frontend/deploy.yaml
+          sed -Ei "s#(image:[[:space:]]*${REG}/${BE_NAME})[^[:space:]]+#\\1:${BE_SHA}#" k8s/backend/deploy.yaml
 
-          echo '--- FE deploy image ---'
-          grep -n 'image:' k8s/frontend/deploy.yaml || true
-          echo '--- BE deploy image ---'
-          grep -n 'image:' k8s/backend/deploy.yaml || true
+          echo '--- FE deploy image ---'; grep -n '^[[:space:]]*image:' k8s/frontend/deploy.yaml || true
+          echo '--- BE deploy image ---'; grep -n '^[[:space:]]*image:' k8s/backend/deploy.yaml || true
         '''
       }
     }
@@ -124,7 +124,6 @@ pipeline {
             git config --global user.email "skala@skala-ai.com"
 
             git fetch origin || true
-
             # gitops 브랜치 체크아웃
             if git show-ref --verify --quiet refs/heads/gitops; then
               git checkout -f gitops
@@ -134,28 +133,17 @@ pipeline {
               git checkout -B gitops origin/main || git checkout -B gitops main
             fi
 
-            # (선택) namespace 삭제 반영
-            [ -f k8s/namespace.yaml ] && git rm k8s/namespace.yaml || true
+            # FE/BE 해시(헥사만) 로드
+            FE_SHA=$(tr -cd '[:xdigit:]' < fe.sha)
+            BE_SHA=$(tr -cd '[:xdigit:]' < be.sha)
 
-            # FE/BE 해시 로드
-            FE_SHA=$(cat fe.sha)
-            BE_SHA=$(cat be.sha)
+            # 태그 부분만 교체
+            sed -Ei "s#(image:[[:space:]]*${REG}/${FE_NAME})[^[:space:]]+#\\1:${FE_SHA}#" k8s/frontend/deploy.yaml
+            sed -Ei "s#(image:[[:space:]]*${REG}/${BE_NAME})[^[:space:]]+#\\1:${BE_SHA}#" k8s/backend/deploy.yaml
 
-            echo "FE_IMG=${FE_IMG}, FE_SHA=${FE_SHA}"
-            echo "BE_IMG=${BE_IMG}, BE_SHA=${BE_SHA}"
-
-            # 이름이 무엇이든 'image:' 라인 전체를 덮어씀 (generic)
-            sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${FE_IMG}:${FE_SHA}#g" k8s/frontend/deploy.yaml
-            sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${BE_IMG}:${BE_SHA}#g" k8s/backend/deploy.yaml
-
-            echo '--- after patch (gitops) ---'
-            grep -n 'image:' k8s/frontend/deploy.yaml || true
-            grep -n 'image:' k8s/backend/deploy.yaml || true
-
-            # 충돌 마커가 있으면 실패(깨진 YAML 방지)
+            # 충돌 마커 방지 체크
             ! grep -R --line-number -E '^(<{7}|={7}|>{7})' k8s || { echo "Conflict markers found"; git --no-pager grep -nE '^(<{7}|={7}|>{7})' k8s; exit 2; }
 
-            # 삭제/수정 모두 스테이징
             git add -A k8s
             git status
           '''
