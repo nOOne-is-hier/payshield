@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, APIRouter
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -9,6 +9,7 @@ import numpy as np
 from app.store import store
 from app.model_loader import model_svc
 from app.drift import drift_monitor
+from app.aiops_agent import tick
 from .streamer import scenario
 
 # app/app.py  (당신의 FastAPI 생성 코드 있는 파일)
@@ -42,6 +43,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+api = APIRouter(prefix="/api")
 
 # ====== 초기 모델 로드 ======
 MODEL_DIR = os.environ.get("MODEL_DIR", "models/v1.0")
@@ -77,7 +80,7 @@ class PredictResponse(BaseModel):
 
 
 # ====== /predict ======
-@app.post("/predict", response_model=PredictResponse)
+@api.post("/predict", response_model=PredictResponse)
 def predict(body: PredictRequest):
     X = np.array([r.V for r in body.records], dtype=np.float32)
     scores, flags, latency_ms = model_svc.predict_batch(X, store.threshold)
@@ -108,7 +111,7 @@ def predict(body: PredictRequest):
 
 
 # ====== /metrics ======
-@app.get("/metrics")
+@api.get("/metrics")
 def metrics(cur_win: int = 300):
     """
     - 최근 cur_win 표본(기본 300)만 사용 (희석 방지)
@@ -254,7 +257,7 @@ def metrics(cur_win: int = 300):
     return resp
 
 
-@app.post("/drift/reference/reset")
+@api.post("/drift/reference/reset")
 def drift_ref_reset():
     drift_monitor.ref_amount = None
     drift_monitor.ref_hour = None
@@ -263,14 +266,14 @@ def drift_ref_reset():
     return {"ok": True}
 
 
-@app.post("/drift/reference/lock")
+@api.post("/drift/reference/lock")
 def drift_ref_lock():
     store.ref_locked = True
     return {"ok": True}
 
 
 # ====== /alerts ======
-@app.get("/alerts")
+@api.get("/alerts")
 def alerts(limit: int = 50):
     items = []
     for x in reversed(store.pred_feed):
@@ -291,7 +294,7 @@ def alerts(limit: int = 50):
 
 
 # ====== /model/info & /model/threshold ======
-@app.get("/model/info")
+@api.get("/model/info")
 def model_info():
     return {
         "active_version": model_svc.version,
@@ -305,7 +308,7 @@ class ThrBody(BaseModel):
     threshold: float
 
 
-@app.post("/model/threshold")
+@api.post("/model/threshold")
 def model_threshold(body: ThrBody):
     now = time.time()
     if not (0.55 <= body.threshold <= 0.85):
@@ -323,7 +326,7 @@ class SmsBody(BaseModel):
     message: str
 
 
-@app.post("/alerts/sms")
+@api.post("/alerts/sms")
 def sms_stub(body: SmsBody):
     print("[SMS]", body.to, body.message[:120])
     return {"status": "sent"}
@@ -340,7 +343,7 @@ _guard = {
 }
 
 
-@app.post("/drift/reset")
+@api.post("/drift/reset")
 def drift_reset():
     drift_monitor.set_reference(None, None)  # 구현에 맞게 초기화
     drift_monitor.ref_amount = None
@@ -348,10 +351,7 @@ def drift_reset():
     return {"ok": True}
 
 
-from app.aiops_agent import tick
-
-
-@app.post("/agent/run")
+@api.post("/agent/run")
 def agent_run():
     state = tick()
     if isinstance(state, dict):
@@ -379,13 +379,13 @@ class ScenarioBody(BaseModel):
     sleep_sec: float = 0.5
 
 
-@app.post("/scenario/start")
+@api.post("/scenario/start")
 def scenario_start(b: ScenarioBody):
     ok = scenario.start(b.normal_path, b.drift_path, b.batch, b.sleep_sec)
     return {"ok": ok}
 
 
-@app.get("/scenario/status")
+@api.get("/scenario/status")
 def scenario_status():
     from .streamer import streamer
 
@@ -400,7 +400,7 @@ def scenario_status():
 dashboard_feed = []
 
 
-@app.post("/dashboard/summary")
+@api.post("/dashboard/summary")
 def dashboard_summary(body: Dict[str, Any]):
     item = {"ts": time.time(), **body}
     dashboard_feed.append(item)
@@ -409,7 +409,7 @@ def dashboard_summary(body: Dict[str, Any]):
     return {"ok": True}
 
 
-@app.get("/dashboard/summary")
+@api.get("/dashboard/summary")
 def dashboard_summary_get(limit: int = 50):
     return {"items": list(reversed(dashboard_feed[-limit:]))}
 
@@ -422,7 +422,7 @@ class DriftReq(BaseModel):
     seconds: float = 30.0
 
 
-@app.post("/feeder/start")
+@api.post("/feeder/start")
 def feeder_start():
     ok = feeder.start_normal()
     if ok:
@@ -431,13 +431,13 @@ def feeder_start():
     return {"ok": ok, **feeder.status()}
 
 
-@app.post("/feeder/stop")
+@api.post("/feeder/stop")
 def feeder_stop():
     ok = feeder.stop_normal()
     return {"ok": ok, **feeder.status()}
 
 
-@app.post("/feeder/inject_drift")
+@api.post("/feeder/inject_drift")
 def feeder_inject(body: DriftReq):
     ok = feeder.inject_drift(body.seconds)
     if ok:
@@ -446,12 +446,12 @@ def feeder_inject(body: DriftReq):
     return {"ok": ok, **feeder.status()}
 
 
-@app.get("/feeder/status")
+@api.get("/feeder/status")
 def feeder_status():
     return feeder.status()
 
 
-@app.get("/dashboard/stream")
+@api.get("/dashboard/stream")
 async def dashboard_stream(request: Request):
     async def eventgen():
         last_ts = 0.0
@@ -472,3 +472,6 @@ async def dashboard_stream(request: Request):
             await asyncio.sleep(1)
 
     return StreamingResponse(eventgen(), media_type="text/event-stream")
+
+
+app.include_router(api)
