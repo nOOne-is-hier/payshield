@@ -5,15 +5,14 @@ metadata:
   namespace: skala-practice
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
 spec:
   ingressClassName: public-nginx
   rules:
     - host: sk018-ingress.skala25a.project.skala-ai.com
       http:
         paths:
-          - path: /api(/|$)(.*)
-            pathType: ImplementationSpecific # NGINX 정규식 매칭 허용
+          - path: /api
+            pathType: Prefix
             backend:
               service:
                 name: be-svc
