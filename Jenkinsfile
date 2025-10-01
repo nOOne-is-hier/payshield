@@ -107,72 +107,78 @@ pipeline {
       }
     }
 
+    // deployment yaml의 Git 커밋/푸시
     stage('Git Commit & Push (gitops)') {
       steps {
+        script {
+          def gitRepoPath = env.GIT_URL.replaceFirst(/^https?:\/\//, '')
+          echo "gitRepoPath: ${gitRepoPath}"
+        }
+
         sh '''
           set -eux
-
-          SHORT_SHA=$(cat SHORT_SHA 2>/dev/null || git rev-parse --short=12 HEAD)
-          DEFAULT_BRANCH=$(cat DEFAULT_BRANCH 2>/dev/null || echo main)
-
           git config --global --add safe.directory '*'
-          git config user.name  "skala-gitops"
-          git config user.email "skala@skala-ai.com"
+          git config --global user.name "skala-gitops"
+          git config --global user.email "skala@skala-ai.com"
 
-          # 최신 정보 가져오기
           git fetch origin || true
 
-          # 현재 워킹 브랜치(예: main)의 k8s 파일 백업
-          mkdir -p .gitops-tmp
-          cp -a k8s/frontend/deploy.yaml .gitops-tmp/fe.yaml
-          cp -a k8s/backend/deploy.yaml  .gitops-tmp/be.yaml
+          # 현재 브랜치(deploy.yaml 원본) 백업
+          cp ./k8s/deploy.yaml ./k8s/deploy.yaml.backup
 
-          # gitops 브랜치로 체크아웃 (원격/로컬 있으면 사용, 없으면 기본브랜치에서 생성)
+          # gitops 체크아웃
           if git show-ref --verify --quiet refs/heads/gitops; then
             git checkout -f gitops
           elif git show-ref --verify --quiet refs/remotes/origin/gitops; then
             git checkout -B gitops origin/gitops
           else
-            git checkout -B gitops "${DEFAULT_BRANCH}"
+            # 기본 브랜치에서 새로 생성(필요시 main→변경)
+            git checkout -B gitops origin/main || git checkout -B gitops main
           fi
 
-          # 백업본 반영 (워킹 트리에 최신 파일로 덮어쓰기)
-          cp -a .gitops-tmp/fe.yaml k8s/frontend/deploy.yaml
-          cp -a .gitops-tmp/be.yaml k8s/backend/deploy.yaml
-          rm -rf .gitops-tmp
+          # 백업본 반영
+          cp ./k8s/deploy.yaml.backup ./k8s/deploy.yaml
+          rm -f ./k8s/deploy.yaml.backup
 
-          # 이미지 태그 치환 (FE/BE 각각)
-          # FE_IMG/BE_IMG는 env에서 전달됨. 라인 전체 치환 방식으로 안전하게 교체.
-          sed -Ei "s#(image:[[:space:]]*${FE_IMG}:).*#\\1${SHORT_SHA}#g" k8s/frontend/deploy.yaml
-          sed -Ei "s#(image:[[:space:]]*${BE_IMG}:).*#\\1${SHORT_SHA}#g" k8s/backend/deploy.yaml
+          # --- 여기부터 핵심: image 라인 전체 강제 치환 ---
+          # 여러 컨테이너가 있으면 컨테이너 이름별로 명시적으로 바꾸거나,
+          # 단일 컨테이너면 아래 한 줄만으로 충분.
+          # 1) 단일 컨테이너 배포(추천)
+          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${IMAGE_REGISTRY}/${IMAGE_NAME}:${FINAL_IMAGE_TAG}#g" ./k8s/deploy.yaml
 
-          echo '--- FE deploy image ---'; grep -n 'image:' k8s/frontend/deploy.yaml || true
-          echo '--- BE deploy image ---'; grep -n 'image:' k8s/backend/deploy.yaml || true
+          # 2) (선택) FE/BE가 따로 있는 경우 예시
+          # sed -Ei "/name:[[:space:]]*fe/ ,/image:/ s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${IMAGE_REGISTRY}/${FE_IMAGE_NAME}:${FINAL_IMAGE_TAG}#g" ./k8s/deploy.yaml
+          # sed -Ei "/name:[[:space:]]*be/ ,/image:/ s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${IMAGE_REGISTRY}/${BE_IMAGE_NAME}:${FINAL_IMAGE_TAG}#g" ./k8s/deploy.yaml
 
-          git add k8s/frontend/deploy.yaml k8s/backend/deploy.yaml || true
-          if ! git diff --cached --quiet; then
-            git commit -m "[AUTO] gitops: FE=${SHORT_SHA} BE=${SHORT_SHA}"
-          else
-            echo "No manifest changes."
-          fi
+          echo '--- after patch ---'
+          grep -n 'image:' ./k8s/deploy.yaml || true
+
+          git add ./k8s/deploy.yaml || true
+          git status
         '''
+
         withCredentials([usernamePassword(
-          credentialsId: "${GIT_ID}",
+          credentialsId: "${env.GIT_ID}",
           usernameVariable: 'GIT_PUSH_USER',
-          passwordVariable: 'GIT_PUSH_PASS'
+          passwordVariable: 'GIT_PUSH_PASSWORD'
         )]) {
-          sh '''
-            set -eux
-            REPO_PATH=$(git config --get remote.origin.url | sed -E 's#^https?://##')
-            git remote set-url origin "https://${GIT_PUSH_USER}:${GIT_PUSH_PASS}@${REPO_PATH}"
-            # gitops 브랜치로 푸시 (생성/갱신 모두 대응)
-            git push origin gitops:gitops --force-with-lease || git push origin gitops
-            echo "Pushed to origin/gitops"
-          '''
+          script {
+            env.GIT_REPO_PATH = env.GIT_URL.replaceFirst(/^https?:\/\//, '')
+            sh '''
+              set -eux
+              if ! git diff --cached --quiet; then
+                git commit -m "[AUTO] Update deploy.yaml with image ${FINAL_IMAGE_TAG}"
+                git remote set-url origin "https://${GIT_PUSH_USER}:${GIT_PUSH_PASSWORD}@${GIT_REPO_PATH}"
+                git push origin gitops --force-with-lease || git push origin gitops
+                echo "Pushed to gitops"
+              else
+                echo "No changes to commit"
+              fi
+            '''
+          }
         }
       }
     }
-  }
 
   post {
     success { echo "✅ FE/BE push & manifests updated: ${env.SHORT_SHA}" }
