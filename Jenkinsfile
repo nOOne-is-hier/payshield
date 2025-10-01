@@ -27,7 +27,6 @@ pipeline {
   }
 
   stages {
-
     stage('Inject OPENAI Secret') {
       steps {
         withCredentials([string(credentialsId: 'openai-api-key-id', variable: 'OPENAI_API_KEY')]) {
