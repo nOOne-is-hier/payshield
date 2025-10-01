@@ -109,67 +109,72 @@ pipeline {
       }
     }
 
-      // deployment yaml의 Git 커밋/푸시
-      stage('Git Commit & Push (gitops)') {
-        steps {
-          script {
-            env.GIT_REPO_PATH = env.GIT_URL.replaceFirst(/^https?:\/\//, '')
-            echo "gitRepoPath: ${env.GIT_REPO_PATH}"
-          }
+    // deployment yaml의 Git 커밋/푸시
+    stage('Git Commit & Push (gitops)') {
+      steps {
+        script {
+          // 1) sha를 먼저 환경변수로 고정 (파일 의존 제거)
+          env.SHORT_SHA = sh(script: "cat SHORT_SHA 2>/dev/null || git rev-parse --short=12 HEAD", returnStdout: true).trim()
+          env.FE_SHA = env.SHORT_SHA
+          env.BE_SHA = env.SHORT_SHA
 
+          env.GIT_REPO_PATH = env.GIT_URL.replaceFirst(/^https?:\/\//, '')
+          echo "gitRepoPath: ${env.GIT_REPO_PATH}"
+        }
+
+        sh '''
+          set -eux
+          git config --global --add safe.directory '*'
+          git config --global user.name "skala-gitops"
+          git config --global user.email "skala@skala-ai.com"
+
+          # 2) 원격 최신화
+          git fetch --all --prune || true
+
+          # 3) 워킹트리 정리 후 gitops 체크아웃
+          git reset --hard
+          git clean -fd
+          if git show-ref --verify --quiet refs/remotes/origin/gitops; then
+            git checkout -B gitops origin/gitops
+          elif git show-ref --verify --quiet refs/remotes/origin/main; then
+            git checkout -B gitops origin/main
+          else
+            git checkout -B gitops
+          fi
+
+          # 4) image 태그만 SHORT_SHA로 교체 (레지스트리/이미지명 유지)
+          sed -Ei "s#(image:[[:space:]]*${REG_URL}/${REG_PROJECT}/${FE_NAME})[^[:space:]]*#\\1:${FE_SHA}#" k8s/frontend/deploy.yaml || true
+          sed -Ei "s#(image:[[:space:]]*${REG_URL}/${REG_PROJECT}/${BE_NAME})[^[:space:]]*#\\1:${BE_SHA}#" k8s/backend/deploy.yaml  || true
+
+          echo '--- after patch ---'
+          grep -n '^[[:space:]]*image:' k8s/frontend/deploy.yaml || true
+          grep -n '^[[:space:]]*image:' k8s/backend/deploy.yaml  || true
+
+          # 5) 커밋 준비
+          git add -A k8s
+          git status
+        '''
+
+        withCredentials([usernamePassword(
+          credentialsId: "${env.GIT_ID}",
+          usernameVariable: 'GIT_PUSH_USER',
+          passwordVariable: 'GIT_PUSH_PASSWORD'
+        )]) {
           sh '''
             set -eux
-            git config --global --add safe.directory '*'
-            git config --global user.name "skala-gitops"
-            git config --global user.email "skala@skala-ai.com"
-
-            git fetch origin || true
-            # gitops 브랜치 체크아웃
-            if git show-ref --verify --quiet refs/heads/gitops; then
-              git checkout -f gitops
-            elif git show-ref --verify --quiet refs/remotes/origin/gitops; then
-              git checkout -B gitops origin/gitops
+            if ! git diff --cached --quiet; then
+              git commit -m "[AUTO] Update FE:${FE_SHA} BE:${BE_SHA}"
+              git remote set-url origin "https://${GIT_PUSH_USER}:${GIT_PUSH_PASSWORD}@${GIT_REPO_PATH}"
+              git push origin gitops --force-with-lease || git push origin gitops
+              echo "Pushed to gitops"
             else
-              git checkout -B gitops origin/main || git checkout -B gitops main
+              echo "No changes to commit"
             fi
-
-            # FE/BE 해시(헥사만) 로드
-            FE_SHA=$(tr -cd '[:xdigit:]' < fe.sha)
-            BE_SHA=$(tr -cd '[:xdigit:]' < be.sha)
-
-            # 태그 부분만 교체
-            sed -Ei "s#(image:[[:space:]]*${REG}/${FE_NAME})[^[:space:]]+#\\1:${FE_SHA}#" k8s/frontend/deploy.yaml
-            sed -Ei "s#(image:[[:space:]]*${REG}/${BE_NAME})[^[:space:]]+#\\1:${BE_SHA}#" k8s/backend/deploy.yaml
-
-            # 충돌 마커 방지 체크
-            ! grep -R --line-number -E '^(<{7}|={7}|>{7})' k8s || { echo "Conflict markers found"; git --no-pager grep -nE '^(<{7}|={7}|>{7})' k8s; exit 2; }
-
-            git add -A k8s
-            git status
           '''
-
-          withCredentials([usernamePassword(
-            credentialsId: "${env.GIT_ID}",
-            usernameVariable: 'GIT_PUSH_USER',
-            passwordVariable: 'GIT_PUSH_PASSWORD'
-          )]) {
-            sh '''
-              set -eux
-              if ! git diff --cached --quiet; then
-                FE_SHA=$(cat fe.sha); BE_SHA=$(cat be.sha)
-                git commit -m "[AUTO] Update FE:${FE_SHA} BE:${BE_SHA}"
-                git remote set-url origin "https://${GIT_PUSH_USER}:${GIT_PUSH_PASSWORD}@${GIT_REPO_PATH}"
-                git push origin gitops --force-with-lease || git push origin gitops
-                echo "Pushed to gitops"
-              else
-                echo "No changes to commit"
-              fi
-            '''
-          }
         }
       }
     }
-  
+  }
 
   post {
     success {
