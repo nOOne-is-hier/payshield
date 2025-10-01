@@ -13,7 +13,7 @@ spec:
     spec:
       containers:
         - name: be
-          image: amdp-registry.skala-ai.com/skala25a/sk018-be:latest
+          image: amdp-registry.skala-ai.com/skala25a/be-deploy:latest
           env:
             - name: UVICORN_WORKERS
               value: "1"
