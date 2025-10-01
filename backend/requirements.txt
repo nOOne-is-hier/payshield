@@ -7,5 +7,6 @@ scikit-learn
 langchain
 langgraph
 openai
+torch
 langchain-openai
 httpx
