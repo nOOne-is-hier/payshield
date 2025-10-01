@@ -16,7 +16,7 @@ spec:
 <<<<<<< Updated upstream
           image: amdp-registry.skala-ai.com/skala25a/sk018-be:latest
 =======
-          image: amdp-registry.skala-ai.com/skala25a/be-deploy:025d1bd095b2
+          image: amdp-registry.skala-ai.com/skala25a/be-deploy:null
 >>>>>>> Stashed changes
           env:
             - name: UVICORN_WORKERS

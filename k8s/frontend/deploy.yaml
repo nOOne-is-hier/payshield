@@ -16,7 +16,7 @@ spec:
 <<<<<<< Updated upstream
           image: amdp-registry.skala-ai.com/skala25a/sk018-fe:latest
 =======
-          image: amdp-registry.skala-ai.com/skala25a/fe-deploy:025d1bd095b2
+          image: amdp-registry.skala-ai.com/skala25a/fe-deploy:null
 >>>>>>> Stashed changes
           ports:
             - containerPort: 80
