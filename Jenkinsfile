@@ -3,21 +3,21 @@ pipeline {
 
   environment {
     // ====== 사용자 수정 영역 ======
-    GIT_URL                = 'https://github.com/nOOne-is-hier/payshield.git'
-    GIT_BRANCH             = 'main'                         // 필요시 master
-    GIT_ID                 = 'skala-github-id'              // GitHub PAT (username/password or token)
-    REG_URL                = 'amdp-registry.skala-ai.com'   // Harbor 도메인
-    REG_PROJECT            = 'skala25a'                     // Harbor 프로젝트
-    FE_NAME                = 'fe-deploy'                     // 프론트 이미지명
-    BE_NAME                = 'be-deploy'                     // 백엔드 이미지명
-    DOCKER_CRED_ID         = 'skala-image-registry-id'      // Harbor 계정(Username/Password)
+    GIT_URL        = 'https://github.com/nOOne-is-hier/payshield.git'
+    GIT_BRANCH     = 'main'                     // 필요시 master
+    GIT_ID         = 'skala-github-id'          // GitHub PAT (username/password or token)
+    REG_URL        = 'amdp-registry.skala-ai.com' // Harbor 도메인
+    REG_PROJECT    = 'skala25a'                 // Harbor 프로젝트
+    FE_NAME        = 'fe-deploy'                // 프론트 이미지명
+    BE_NAME        = 'be-deploy'                // 백엔드 이미지명
+    DOCKER_CRED_ID = 'skala-image-registry-id'  // Harbor 계정(Username/Password)
     // ============================
 
-    REG                    = "${REG_URL}/${REG_PROJECT}"
-    FE_IMG                 = "${REG}/${FE_NAME}"
-    BE_IMG                 = "${REG}/${BE_NAME}"
-    SHORT_SHA              = ''
-    DEFAULT_BRANCH         = ''
+    REG        = "${REG_URL}/${REG_PROJECT}"
+    FE_IMG     = "${REG}/${FE_NAME}"
+    BE_IMG     = "${REG}/${BE_NAME}"
+    SHORT_SHA  = ''
+    DEFAULT_BRANCH = ''
   }
 
   options {
@@ -50,7 +50,9 @@ pipeline {
 
     stage('Docker Login (Harbor)') {
       steps {
-        withCredentials([usernamePassword(credentialsId: "${DOCKER_CRED_ID}", usernameVariable: 'REG_USER', passwordVariable: 'REG_PASS')]) {
+        withCredentials([
+          usernamePassword(credentialsId: "${DOCKER_CRED_ID}", usernameVariable: 'REG_USER', passwordVariable: 'REG_PASS')
+        ]) {
           sh '''
             set -eux
             echo "$REG_PASS" | docker login "${REG_URL}" -u "$REG_USER" --password-stdin
@@ -93,81 +95,81 @@ pipeline {
       steps {
         sh '''
           set -eux
-          FE_SHA=$(cat fe.sha); BE_SHA=$(cat be.sha)
+          # sha 파일이 "FE_SHA=xxxx" 같은 형식이어도 안전하게 헥사만 추출
+          FE_SHA=$(tr -cd '[:xdigit:]' < fe.sha)
+          BE_SHA=$(tr -cd '[:xdigit:]' < be.sha)
 
-          # k8s 이미지 태그 치환 (frontend/backend 각각의 deploy.yaml)
-          sed -Ei "s#(image:[[:space:]]*${FE_IMG}:).*#\\1${FE_SHA}#g" k8s/frontend/deploy.yaml
-          sed -Ei "s#(image:[[:space:]]*${BE_IMG}:).*#\\1${BE_SHA}#g" k8s/backend/deploy.yaml
+          # image: <REG>/<NAME>:<oldtag> 의 "태그"만 새 해시로 교체 (레지스트리/이름은 그대로 유지)
+          sed -Ei "s#(image:[[:space:]]*${REG}/${FE_NAME})[^[:space:]]+#\\1:${FE_SHA}#" k8s/frontend/deploy.yaml
+          sed -Ei "s#(image:[[:space:]]*${REG}/${BE_NAME})[^[:space:]]+#\\1:${BE_SHA}#" k8s/backend/deploy.yaml
 
-          echo '--- FE deploy image ---'
-          grep -n 'image:' k8s/frontend/deploy.yaml || true
-          echo '--- BE deploy image ---'
-          grep -n 'image:' k8s/backend/deploy.yaml || true
+          echo '--- FE deploy image ---'; grep -n '^[[:space:]]*image:' k8s/frontend/deploy.yaml || true
+          echo '--- BE deploy image ---'; grep -n '^[[:space:]]*image:' k8s/backend/deploy.yaml || true
         '''
       }
     }
 
+    // deployment yaml의 Git 커밋/푸시
     stage('Git Commit & Push (gitops)') {
       steps {
+        script {
+          // 1) sha를 먼저 환경변수로 고정 (파일 의존 제거)
+          env.SHORT_SHA = sh(script: "cat SHORT_SHA 2>/dev/null || git rev-parse --short=12 HEAD", returnStdout: true).trim()
+          env.FE_SHA = env.SHORT_SHA
+          env.BE_SHA = env.SHORT_SHA
+
+          env.GIT_REPO_PATH = env.GIT_URL.replaceFirst(/^https?:\/\//, '')
+          echo "gitRepoPath: ${env.GIT_REPO_PATH}"
+        }
+
         sh '''
           set -eux
-
-          SHORT_SHA=$(cat SHORT_SHA 2>/dev/null || git rev-parse --short=12 HEAD)
-          DEFAULT_BRANCH=$(cat DEFAULT_BRANCH 2>/dev/null || echo main)
-
           git config --global --add safe.directory '*'
-          git config user.name  "skala-gitops"
-          git config user.email "skala@skala-ai.com"
+          git config --global user.name "skala-gitops"
+          git config --global user.email "skala@skala-ai.com"
 
-          # 최신 정보 가져오기
-          git fetch origin || true
+          # 2) 원격 최신화
+          git fetch --all --prune || true
 
-          # 현재 워킹 브랜치(예: main)의 k8s 파일 백업
-          mkdir -p .gitops-tmp
-          cp -a k8s/frontend/deploy.yaml .gitops-tmp/fe.yaml
-          cp -a k8s/backend/deploy.yaml  .gitops-tmp/be.yaml
-
-          # gitops 브랜치로 체크아웃 (원격/로컬 있으면 사용, 없으면 기본브랜치에서 생성)
-          if git show-ref --verify --quiet refs/heads/gitops; then
-            git checkout -f gitops
-          elif git show-ref --verify --quiet refs/remotes/origin/gitops; then
+          # 3) 워킹트리 정리 후 gitops 체크아웃
+          git reset --hard
+          git clean -fd
+          if git show-ref --verify --quiet refs/remotes/origin/gitops; then
             git checkout -B gitops origin/gitops
+          elif git show-ref --verify --quiet refs/remotes/origin/main; then
+            git checkout -B gitops origin/main
           else
-            git checkout -B gitops "${DEFAULT_BRANCH}"
+            git checkout -B gitops
           fi
 
-          # 백업본 반영 (워킹 트리에 최신 파일로 덮어쓰기)
-          cp -a .gitops-tmp/fe.yaml k8s/frontend/deploy.yaml
-          cp -a .gitops-tmp/be.yaml k8s/backend/deploy.yaml
-          rm -rf .gitops-tmp
+          # 4) image 태그만 SHORT_SHA로 교체 (레지스트리/이미지명 유지)
+          sed -Ei "s#(image:[[:space:]]*${REG_URL}/${REG_PROJECT}/${FE_NAME})[^[:space:]]*#\\1:${FE_SHA}#" k8s/frontend/deploy.yaml || true
+          sed -Ei "s#(image:[[:space:]]*${REG_URL}/${REG_PROJECT}/${BE_NAME})[^[:space:]]*#\\1:${BE_SHA}#" k8s/backend/deploy.yaml  || true
 
-          # 이미지 태그 치환 (FE/BE 각각)
-          # FE_IMG/BE_IMG는 env에서 전달됨. 라인 전체 치환 방식으로 안전하게 교체.
-          sed -Ei "s#(image:[[:space:]]*${FE_IMG}:).*#\\1${SHORT_SHA}#g" k8s/frontend/deploy.yaml
-          sed -Ei "s#(image:[[:space:]]*${BE_IMG}:).*#\\1${SHORT_SHA}#g" k8s/backend/deploy.yaml
+          echo '--- after patch ---'
+          grep -n '^[[:space:]]*image:' k8s/frontend/deploy.yaml || true
+          grep -n '^[[:space:]]*image:' k8s/backend/deploy.yaml  || true
 
-          echo '--- FE deploy image ---'; grep -n 'image:' k8s/frontend/deploy.yaml || true
-          echo '--- BE deploy image ---'; grep -n 'image:' k8s/backend/deploy.yaml || true
-
-          git add k8s/frontend/deploy.yaml k8s/backend/deploy.yaml || true
-          if ! git diff --cached --quiet; then
-            git commit -m "[AUTO] gitops: FE=${SHORT_SHA} BE=${SHORT_SHA}"
-          else
-            echo "No manifest changes."
-          fi
+          # 5) 커밋 준비
+          git add -A k8s
+          git status
         '''
+
         withCredentials([usernamePassword(
-          credentialsId: "${GIT_ID}",
+          credentialsId: "${env.GIT_ID}",
           usernameVariable: 'GIT_PUSH_USER',
-          passwordVariable: 'GIT_PUSH_PASS'
+          passwordVariable: 'GIT_PUSH_PASSWORD'
         )]) {
           sh '''
             set -eux
-            REPO_PATH=$(git config --get remote.origin.url | sed -E 's#^https?://##')
-            git remote set-url origin "https://${GIT_PUSH_USER}:${GIT_PUSH_PASS}@${REPO_PATH}"
-            # gitops 브랜치로 푸시 (생성/갱신 모두 대응)
-            git push origin gitops:gitops --force-with-lease || git push origin gitops
-            echo "Pushed to origin/gitops"
+            if ! git diff --cached --quiet; then
+              git commit -m "[AUTO] Update FE:${FE_SHA} BE:${BE_SHA}"
+              git remote set-url origin "https://${GIT_PUSH_USER}:${GIT_PUSH_PASSWORD}@${GIT_REPO_PATH}"
+              git push origin gitops --force-with-lease || git push origin gitops
+              echo "Pushed to gitops"
+            else
+              echo "No changes to commit"
+            fi
           '''
         }
       }
@@ -175,11 +177,19 @@ pipeline {
   }
 
   post {
-    success { echo "✅ FE/BE push & manifests updated: ${env.SHORT_SHA}" }
-    failure { echo "❌ Pipeline failed. Check logs." }
+    success {
+      echo "✅ FE/BE push & manifests updated: ${env.SHORT_SHA}"
+    }
+    failure {
+      echo "❌ Pipeline failed. Check logs."
+    }
     always {
       script {
-        try { archiveArtifacts artifacts: '*.sha', onlyIfSuccessful: false } catch (e) { echo "skip archive: ${e.class.simpleName}" }
+        try {
+          archiveArtifacts artifacts: '*.sha', onlyIfSuccessful: false
+        } catch (e) {
+          echo "skip archive: ${e.class.simpleName}"
+        }
       }
     }
   }
