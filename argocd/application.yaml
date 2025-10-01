@@ -2,7 +2,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: sk018-vue-fastapi
-  namespace: argocd
+  namespace: skala-argocd
 spec:
   project: default
   destination:
