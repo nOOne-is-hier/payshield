@@ -98,8 +98,8 @@ pipeline {
           FE_SHA=$(cat fe.sha); BE_SHA=$(cat be.sha)
 
           # k8s 이미지 태그 치환 (frontend/backend 각각의 deploy.yaml)
-          sed -Ei "s#(image:[[:space:]]*${FE_IMG}:).*#\\1${FE_SHA}#g" k8s/frontend/deploy.yaml
-          sed -Ei "s#(image:[[:space:]]*${BE_IMG}:).*#\\1${BE_SHA}#g" k8s/backend/deploy.yaml
+          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${FE_IMG}:${FE_SHA}#g" k8s/frontend/deploy.yaml
+          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${BE_IMG}:${BE_SHA}#g" k8s/backend/deploy.yaml
 
           echo '--- FE deploy image ---'
           grep -n 'image:' k8s/frontend/deploy.yaml || true
@@ -142,8 +142,8 @@ pipeline {
 
           # 안전하게 한 번 더 치환(브랜치 전환 동안 변경 유실 방지)
           FE_SHA=$(cat fe.sha); BE_SHA=$(cat be.sha)
-          sed -Ei "s#(image:[[:space:]]*${FE_IMG}:).*#\\1${FE_SHA}#g" k8s/frontend/deploy.yaml
-          sed -Ei "s#(image:[[:space:]]*${BE_IMG}:).*#\\1${BE_SHA}#g" k8s/backend/deploy.yaml
+          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${FE_IMG}:${FE_SHA}#g" k8s/frontend/deploy.yaml
+          sed -Ei "s#(^[[:space:]]*image:[[:space:]]*).*$#\\1${BE_IMG}:${BE_SHA}#g" k8s/backend/deploy.yaml
 
           echo '--- after patch (gitops) ---'
           grep -n 'image:' k8s/frontend/deploy.yaml || true
