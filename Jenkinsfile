@@ -85,7 +85,7 @@ pipeline {
 
           docker build -t "${BE_IMG}:${SHORT_SHA}" -t "${BE_IMG}:latest" -f backend/Dockerfile backend
           docker push "${BE_IMG}:${SHORT_SHA}"
-          docker push "${BE_IMG}:latest}"
+          docker push "${BE_IMG}:latest"
           echo "${SHORT_SHA}" > be.sha
         '''
       }
